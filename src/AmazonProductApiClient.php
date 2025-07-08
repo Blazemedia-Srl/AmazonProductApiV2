@@ -31,6 +31,7 @@ class AmazonProductApiClient
     private string $region;
     private string $endpoint;
     private string $trackingPlaceholder;
+    private int $timeout;
     private AwsSignature $awsSignature;
 
     /**
@@ -80,6 +81,16 @@ class AmazonProductApiClient
     /**
      * Constructor
      * 
+     * Configuration array can include:
+     * - accessKey (or access_key): AWS Access Key ID
+     * - secretKey (or secret_key): AWS Secret Access Key  
+     * - partnerTag (or partner_tag): Amazon Associate Partner Tag
+     * - marketplace: Amazon marketplace (e.g., 'www.amazon.com')
+     * - host: Amazon API host (e.g., 'webservices.amazon.com')
+     * - region: AWS region (optional, auto-detected from marketplace)
+     * - timeout: Request timeout in seconds (default: 30, max: 300)
+     * - trackingPlaceholder (or tracking_placeholder): Tracking placeholder (optional)
+     * 
      * @param array|string $config Configuration array or path to JSON config file
      * @throws InvalidParameterException
      */
@@ -96,6 +107,7 @@ class AmazonProductApiClient
         $this->secretKey = $config['secretKey'] ?? $config['secret_key'];
         $this->partnerTag = $config['partnerTag'] ?? $config['partner_tag'];
         $this->trackingPlaceholder = $config['trackingPlaceholder'] ?? $config['tracking_placeholder'] ?? 'booBLZTRKood';
+        $this->timeout = $config['timeout'] ?? 30; // Default 30 seconds timeout
         
         // Handle marketplace/host configuration
         if (isset($config['host'])) {
@@ -191,7 +203,8 @@ class AmazonProductApiClient
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_ENCODING => '',
             CURLOPT_MAXREDIRS => 10,
-            CURLOPT_TIMEOUT => 30,
+            CURLOPT_TIMEOUT => $this->timeout,
+            CURLOPT_CONNECTTIMEOUT => min($this->timeout, 10), // Connection timeout (max 10 seconds)
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
             CURLOPT_CUSTOMREQUEST => 'POST',
@@ -204,11 +217,19 @@ class AmazonProductApiClient
         $response = curl_exec($curl);
         $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
         $error = curl_error($curl);
+        $errorCode = curl_errno($curl);
         
         curl_close($curl);
 
         if ($response === false) {
-            throw new AmazonApiException("cURL Error: {$error}");
+            // Check for specific timeout errors
+            if ($errorCode === CURLE_OPERATION_TIMEDOUT || $errorCode === CURLE_OPERATION_TIMEOUTED) {
+                throw new AmazonApiException("Request timeout after {$this->timeout} seconds. Try increasing the timeout or check your network connection.");
+            } elseif ($errorCode === CURLE_COULDNT_CONNECT) {
+                throw new AmazonApiException("Could not connect to Amazon API. Please check your network connection.");
+            } else {
+                throw new AmazonApiException("cURL Error (Code: {$errorCode}): {$error}");
+            }
         }
 
         $decodedResponse = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
@@ -503,5 +524,30 @@ class AmazonProductApiClient
         ];
 
         return $hostToMarketplace[$host] ?? $host;
+    }
+
+    /**
+     * Set request timeout in seconds
+     * 
+     * @param int $timeout Timeout in seconds (minimum 1, maximum 300)
+     * @throws InvalidParameterException
+     */
+    public function setTimeout(int $timeout): void
+    {
+        if ($timeout < 1 || $timeout > 300) {
+            throw new InvalidParameterException('Timeout must be between 1 and 300 seconds');
+        }
+        
+        $this->timeout = $timeout;
+    }
+
+    /**
+     * Get current timeout setting
+     * 
+     * @return int Current timeout in seconds
+     */
+    public function getTimeout(): int
+    {
+        return $this->timeout;
     }
 }
