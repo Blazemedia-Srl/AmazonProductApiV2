@@ -134,6 +134,12 @@ class ProductItem
             return null;
         }
 
+        // Handle new API structure (OffersV2) with nested Money object
+        if (isset($offer['Price']['Money'])) {
+            return new Price($offer['Price']['Money']);
+        }
+        
+        // Handle old API structure
         return new Price($offer['Price']);
     }
 
@@ -146,11 +152,21 @@ class ProductItem
     {
         $offer = $this->getBuyBoxOffer();
         
-        if (!$offer || !isset($offer['SavingBasis'])) {
+        if (!$offer) {
             return $this->getPrice();
         }
 
-        return new Price($offer['SavingBasis']);
+        // Handle new API structure (OffersV2) with nested SavingBasis
+        if (isset($offer['Price']['SavingBasis']['Money'])) {
+            return new Price($offer['Price']['SavingBasis']['Money']);
+        }
+        
+        // Handle old API structure
+        if (isset($offer['SavingBasis'])) {
+            return new Price($offer['SavingBasis']);
+        }
+
+        return $this->getPrice();
     }
 
     /**
@@ -160,6 +176,14 @@ class ProductItem
      */
     public function getDiscountAmount(): ?Price
     {
+        $offer = $this->getBuyBoxOffer();
+        
+        // Handle new API structure (OffersV2) with direct savings information
+        if ($offer && isset($offer['Price']['Savings']['Money'])) {
+            return new Price($offer['Price']['Savings']['Money']);
+        }
+        
+        // Fallback to calculation method
         $original = $this->getOriginalPrice();
         $current = $this->getPrice();
         
@@ -187,6 +211,14 @@ class ProductItem
      */
     public function getDiscountPercentage(): ?float
     {
+        $offer = $this->getBuyBoxOffer();
+        
+        // Handle new API structure (OffersV2) with direct percentage information
+        if ($offer && isset($offer['Price']['Savings']['Percentage'])) {
+            return (float) $offer['Price']['Savings']['Percentage'];
+        }
+        
+        // Fallback to calculation method
         $original = $this->getOriginalPrice();
         $current = $this->getPrice();
         
@@ -206,12 +238,106 @@ class ProductItem
     {
         $offer = $this->getBuyBoxOffer();
         
+        // Check for Prime exclusive deal in new API structure
+        if ($offer && isset($offer['DealDetails']['AccessType'])) {
+            return $offer['DealDetails']['AccessType'] === 'PRIME_EXCLUSIVE';
+        }
+        
+        // Check old API structure
         if (!$offer || !isset($offer['ProgramEligibility']['IsPrimeExclusive'])) {
             return false;
         }
 
         return $offer['ProgramEligibility']['IsPrimeExclusive'] === true ||
                $offer['ProgramEligibility']['IsPrimeEligible'] === true;
+    }
+
+    /**
+     * Check if product has an active deal
+     * 
+     * @return bool
+     */
+    public function hasActiveDeal(): bool
+    {
+        $offer = $this->getBuyBoxOffer();
+        return $offer && isset($offer['DealDetails']);
+    }
+
+    /**
+     * Get deal information
+     * 
+     * @return array|null
+     */
+    public function getDealInfo(): ?array
+    {
+        $offer = $this->getBuyBoxOffer();
+        return $offer['DealDetails'] ?? null;
+    }
+
+    /**
+     * Get deal badge text
+     * 
+     * @return string|null
+     */
+    public function getDealBadge(): ?string
+    {
+        $dealInfo = $this->getDealInfo();
+        return $dealInfo['Badge'] ?? null;
+    }
+
+    /**
+     * Get deal end time
+     * 
+     * @return string|null
+     */
+    public function getDealEndTime(): ?string
+    {
+        $dealInfo = $this->getDealInfo();
+        return $dealInfo['EndTime'] ?? null;
+    }
+
+    /**
+     * Get deal start time
+     * 
+     * @return string|null
+     */
+    public function getDealStartTime(): ?string
+    {
+        $dealInfo = $this->getDealInfo();
+        return $dealInfo['StartTime'] ?? null;
+    }
+
+    /**
+     * Check if deal is Prime exclusive
+     * 
+     * @return bool
+     */
+    public function isPrimeExclusiveDeal(): bool
+    {
+        $dealInfo = $this->getDealInfo();
+        return $dealInfo && ($dealInfo['AccessType'] ?? '') === 'PRIME_EXCLUSIVE';
+    }
+
+    /**
+     * Get savings basis type (e.g., "LOWEST_PRICE_STRIKETHROUGH")
+     * 
+     * @return string|null
+     */
+    public function getSavingsBasisType(): ?string
+    {
+        $offer = $this->getBuyBoxOffer();
+        return $offer['Price']['SavingBasis']['SavingBasisType'] ?? null;
+    }
+
+    /**
+     * Get savings basis type label
+     * 
+     * @return string|null
+     */
+    public function getSavingsBasisTypeLabel(): ?string
+    {
+        $offer = $this->getBuyBoxOffer();
+        return $offer['Price']['SavingBasis']['SavingBasisTypeLabel'] ?? null;
     }
 
     /**
@@ -336,7 +462,8 @@ class ProductItem
      */
     public function getAllOffers(): array
     {
-        return $this->data['Offers']['Listings'] ?? [];
+        // Support both old and new API response structures
+        return $this->data['OffersV2']['Listings'] ?? $this->data['Offers']['Listings'] ?? [];
     }
 
     /**
@@ -434,6 +561,8 @@ class ProductItem
             'original_price' => $originalPrice ? $originalPrice->toArray() : null,
             'discount_amount' => $discountAmount ? $discountAmount->toArray() : null,
             'discount_percentage' => $this->getDiscountPercentage(),
+            'savings_basis_type' => $this->getSavingsBasisType(),
+            'savings_basis_type_label' => $this->getSavingsBasisTypeLabel(),
             'has_prime' => $this->hasPrimeOffer(),
             'has_coupons' => $this->hasCoupons(),
             'coupon_discount' => $this->getCouponDiscount(),
@@ -446,6 +575,13 @@ class ProductItem
             'dimensions' => $this->getDimensions(),
             'weight' => $this->getWeight(),
             'classifications' => $this->getClassifications(),
+            // New deal-related fields
+            'has_active_deal' => $this->hasActiveDeal(),
+            'deal_info' => $this->getDealInfo(),
+            'deal_badge' => $this->getDealBadge(),
+            'deal_end_time' => $this->getDealEndTime(),
+            'deal_start_time' => $this->getDealStartTime(),
+            'is_prime_exclusive_deal' => $this->isPrimeExclusiveDeal(),
         ];
     }
 }

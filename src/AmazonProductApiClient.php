@@ -56,28 +56,26 @@ class AmazonProductApiClient
      * Default resources to retrieve (valid PAAPI5 resources)
      */
     private const DEFAULT_RESOURCES = [
-        'ItemInfo.Title',
-        'ItemInfo.ByLineInfo',
-        'ItemInfo.ProductInfo',
-        'ItemInfo.TechnicalInfo',
-        'ItemInfo.Features',
-        'ItemInfo.ContentInfo',
-        'ItemInfo.Classifications',
-        'Images.Primary.Small',
-        'Images.Primary.Medium',
-        'Images.Primary.Large',
-        'Images.Variants.Small',
-        'Images.Variants.Medium',
-        'Images.Variants.Large',
-        'Offers.Listings.Price',
-        'Offers.Listings.ProgramEligibility',
-        'Offers.Listings.SavingBasis',
-        'Offers.Listings.DeliveryInfo',
-        'Offers.Listings.MerchantInfo',
-        'Offers.Listings.Availability',
-        'Offers.Listings.Condition',
-        'Offers.Listings.IsBuyBoxWinner'
+        "ItemInfo.Title",
+        "ItemInfo.ByLineInfo",
+        "ItemInfo.ProductInfo",
+        "ItemInfo.TechnicalInfo",
+        "ItemInfo.Features",
+        "Images.Primary.Small",
+        "Images.Primary.Medium",
+        "Images.Primary.Large",
+        "Images.Variants.Small",
+        "Images.Variants.Medium",
+        "Images.Variants.Large",
+        "OffersV2.Listings.Price",
+        "OffersV2.Listings.DealDetails",
+        "OffersV2.Listings.IsBuyBoxWinner",
+        "OffersV2.Listings.MerchantInfo",
+        "OffersV2.Listings.Availability",
+        "OffersV2.Listings.Condition",
+        "OffersV2.Listings.LoyaltyPoints"
     ];
+
 
     /**
      * Constructor
