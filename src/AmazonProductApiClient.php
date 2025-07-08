@@ -30,6 +30,7 @@ class AmazonProductApiClient
     private string $marketplace;
     private string $region;
     private string $endpoint;
+    private string $trackingPlaceholder;
     private AwsSignature $awsSignature;
 
     /**
@@ -52,7 +53,7 @@ class AmazonProductApiClient
     ];
 
     /**
-     * Default resources to retrieve
+     * Default resources to retrieve (valid PAAPI5 resources)
      */
     private const DEFAULT_RESOURCES = [
         'ItemInfo.Title',
@@ -68,36 +69,55 @@ class AmazonProductApiClient
         'Images.Variants.Small',
         'Images.Variants.Medium',
         'Images.Variants.Large',
-        'OffersV2.Listings.Price',
-        'OffersV2.Listings.ProgramEligibility',
-        'OffersV2.Listings.SavingBasis',
-        'OffersV2.Listings.DeliveryInfo',
-        'OffersV2.Listings.MerchantInfo',
-        'OffersV2.Listings.Availability',
-        'OffersV2.Listings.Condition',
-        'OffersV2.Listings.LoyaltyPoints',
-        'OffersV2.Listings.IsBuyBoxWinner',
-        'OffersV2.Listings.ViolatesMAP'
+        'Offers.Listings.Price',
+        'Offers.Listings.ProgramEligibility',
+        'Offers.Listings.SavingBasis',
+        'Offers.Listings.DeliveryInfo',
+        'Offers.Listings.MerchantInfo',
+        'Offers.Listings.Availability',
+        'Offers.Listings.Condition',
+        'Offers.Listings.IsBuyBoxWinner'
     ];
 
     /**
      * Constructor
      * 
-     * @param array $config Configuration array
+     * @param array|string $config Configuration array or path to JSON config file
      * @throws InvalidParameterException
      */
-    public function __construct(array $config)
+    public function __construct($config)
     {
+        if (is_string($config)) {
+            $config = $this->loadConfigFromFile($config);
+        }
+        
         $this->validateConfig($config);
         
-        $this->accessKey = $config['access_key'];
-        $this->secretKey = $config['secret_key'];
-        $this->partnerTag = $config['partner_tag'];
-        $this->marketplace = $config['marketplace'];
+        // Support both old format (access_key) and new format (accessKey)
+        $this->accessKey = $config['accessKey'] ?? $config['access_key'];
+        $this->secretKey = $config['secretKey'] ?? $config['secret_key'];
+        $this->partnerTag = $config['partnerTag'] ?? $config['partner_tag'];
+        $this->trackingPlaceholder = $config['trackingPlaceholder'] ?? $config['tracking_placeholder'] ?? 'booBLZTRKood';
         
-        $marketplaceConfig = self::MARKETPLACE_ENDPOINTS[$this->marketplace];
-        $this->endpoint = $marketplaceConfig['endpoint'];
-        $this->region = $config['region'] ?? $marketplaceConfig['region'];
+        // Handle marketplace/host configuration
+        if (isset($config['host'])) {
+            // New JSON format uses 'host' directly
+            $this->endpoint = $config['host'];
+            $this->marketplace = $this->getMarketplaceFromHost($config['host']);
+        } else {
+            // Old format uses 'marketplace'
+            $this->marketplace = $config['marketplace'];
+            $marketplaceConfig = self::MARKETPLACE_ENDPOINTS[$this->marketplace];
+            $this->endpoint = $marketplaceConfig['endpoint'];
+        }
+        
+        // Set region (use provided or default from marketplace)
+        if (isset($config['region'])) {
+            $this->region = $config['region'];
+        } else {
+            $marketplaceConfig = self::MARKETPLACE_ENDPOINTS[$this->marketplace] ?? null;
+            $this->region = $marketplaceConfig['region'] ?? 'us-east-1';
+        }
         
         $this->awsSignature = new AwsSignature($this->accessKey, $this->secretKey, $this->region);
     }
@@ -195,8 +215,34 @@ class AmazonProductApiClient
 
         $decodedResponse = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
 
+        // Handle HTTP errors (4xx, 5xx status codes)
         if ($httpCode !== 200) {
             $this->handleApiError($httpCode, $decodedResponse);
+        }
+        
+        // Handle API errors that come with HTTP 200 status but contain error information
+        if (isset($decodedResponse['Errors']) && !empty($decodedResponse['Errors'])) {
+            $error = $decodedResponse['Errors'][0];
+            $errorMessage = $error['Message'] ?? 'Unknown API error';
+            $errorCode = $error['Code'] ?? 'UNKNOWN_ERROR';
+            
+            // Map common error codes to appropriate exception types
+            switch ($errorCode) {
+                case 'InvalidParameterValue':
+                case 'MissingParameter':
+                case 'InvalidParameter':
+                    throw new InvalidParameterException("API Error ({$errorCode}): {$errorMessage}");
+                case 'RequestThrottled':
+                case 'TooManyRequests':
+                    throw new AmazonApiException("Too Many Requests: {$errorMessage}", 429);
+                case 'UnauthorizedOperation':
+                case 'SignatureDoesNotMatch':
+                case 'IncompleteSignature':
+                case 'InvalidAccessKeyId':
+                    throw new AuthenticationException("Authentication failed: {$errorMessage}");
+                default:
+                    throw new AmazonApiException("API Error ({$errorCode}): {$errorMessage}");
+            }
         }
 
         return $decodedResponse;
@@ -213,21 +259,25 @@ class AmazonProductApiClient
         $timestamp = gmdate('Ymd\THis\Z');
         $contentSha256 = hash('sha256', $payload);
         
+        $headersForSigning = [
+            'Host' => $this->endpoint,
+            'Content-Type' => self::CONTENT_TYPE,
+            'Content-Encoding' => self::CONTENT_ENCODING,
+            'X-Amz-Target' => self::AMZ_TARGET,
+            'X-Amz-Content-Sha256' => $contentSha256,
+            'X-Amz-Date' => $timestamp,
+        ];
+        
         $authHeader = $this->awsSignature->generateAuthorizationHeader(
             'POST',
             '/paapi5/getitems',
             $payload,
             $timestamp,
-            [
-                'Content-Type' => self::CONTENT_TYPE,
-                'Content-Encoding' => self::CONTENT_ENCODING,
-                'X-Amz-Target' => self::AMZ_TARGET,
-                'X-Amz-Content-Sha256' => $contentSha256,
-                'X-Amz-Date' => $timestamp,
-            ]
+            $headersForSigning
         );
 
         return [
+            'Host: ' . $this->endpoint,
             'Content-Type: ' . self::CONTENT_TYPE,
             'Content-Encoding: ' . self::CONTENT_ENCODING,
             'X-Amz-Target: ' . self::AMZ_TARGET,
@@ -246,16 +296,37 @@ class AmazonProductApiClient
      */
     private function parseItemsResponse(array $response): array
     {
-        if (!isset($response['ItemsResult']['Items'])) {
-            throw new AmazonApiException('Invalid response format: missing ItemsResult.Items');
+        // Handle different possible response structures
+        $items = null;
+        
+        if (isset($response['ItemsResult']['Items'])) {
+            $items = $response['ItemsResult']['Items'];
+        } elseif (isset($response['GetItemsResponse']['Items'])) {
+            $items = $response['GetItemsResponse']['Items'];
+        } elseif (isset($response['Items'])) {
+            $items = $response['Items'];
+        }
+        
+        if ($items === null) {
+            // If we got here but have errors in the response, it means there was an API error
+            // that should have been caught earlier but wasn't properly handled
+            if (isset($response['Errors'])) {
+                $error = $response['Errors'][0];
+                $errorMessage = $error['Message'] ?? 'Unknown API error';
+                $errorCode = $error['Code'] ?? 'UNKNOWN_ERROR';
+                throw new AmazonApiException("API Error ({$errorCode}): {$errorMessage}");
+            }
+            
+            // Debug the actual response structure
+            throw new AmazonApiException('Invalid response format. Response structure: ' . json_encode(array_keys($response)));
         }
 
-        $items = [];
-        foreach ($response['ItemsResult']['Items'] as $itemData) {
-            $items[] = new ProductItem($itemData);
+        $result = [];
+        foreach ($items as $itemData) {
+            $result[] = new ProductItem($itemData);
         }
 
-        return $items;
+        return $result;
     }
 
     /**
@@ -293,16 +364,35 @@ class AmazonProductApiClient
      */
     private function validateConfig(array $config): void
     {
-        $required = ['access_key', 'secret_key', 'partner_tag', 'marketplace'];
+        // Support both new format (accessKey) and old format (access_key)
+        $accessKey = $config['accessKey'] ?? $config['access_key'] ?? null;
+        $secretKey = $config['secretKey'] ?? $config['secret_key'] ?? null;
+        $partnerTag = $config['partnerTag'] ?? $config['partner_tag'] ?? null;
         
-        foreach ($required as $key) {
-            if (empty($config[$key])) {
-                throw new InvalidParameterException("Missing required configuration: {$key}");
-            }
+        // Check for required fields
+        if (empty($accessKey)) {
+            throw new InvalidParameterException("Missing required configuration: accessKey (or access_key)");
+        }
+        
+        if (empty($secretKey)) {
+            throw new InvalidParameterException("Missing required configuration: secretKey (or secret_key)");
+        }
+        
+        if (empty($partnerTag)) {
+            throw new InvalidParameterException("Missing required configuration: partnerTag (or partner_tag)");
         }
 
-        if (!isset(self::MARKETPLACE_ENDPOINTS[$config['marketplace']])) {
-            throw new InvalidParameterException("Unsupported marketplace: {$config['marketplace']}");
+        // Check for marketplace or host
+        $marketplace = $config['marketplace'] ?? null;
+        $host = $config['host'] ?? null;
+        
+        if (empty($marketplace) && empty($host)) {
+            throw new InvalidParameterException("Missing required configuration: marketplace or host");
+        }
+
+        // If marketplace is provided, validate it
+        if (!empty($marketplace) && !isset(self::MARKETPLACE_ENDPOINTS[$marketplace])) {
+            throw new InvalidParameterException("Unsupported marketplace: {$marketplace}");
         }
     }
 
@@ -312,15 +402,19 @@ class AmazonProductApiClient
      * @param string $asin Product ASIN
      * @param array $resources Optional resources to retrieve
      * @param int $offerCount Number of offers to retrieve (default: 1)
-     * @param string $partnerTag Partner tag for tracking
-     * @param string $trackingPlaceholder Tracking placeholder
+     * @param string|null $partnerTag Partner tag for tracking (defaults to config value)
+     * @param string|null $trackingPlaceholder Tracking placeholder (defaults to config value)
      * @return AmazonItem
      * @throws AmazonApiException
      */
-    public function getAmazonItem(string $asin, array $resources = [], int $offerCount = 1, string $partnerTag = 'blazemedia-21', string $trackingPlaceholder = 'booBLZTRKood'): AmazonItem
+    public function getAmazonItem(string $asin, array $resources = [], int $offerCount = 1, string $partnerTag = null, string $trackingPlaceholder = null): AmazonItem
     {
         $productItem = $this->getItem($asin, $resources, $offerCount);
-        return new AmazonItem($productItem, $partnerTag, $trackingPlaceholder);
+        return new AmazonItem(
+            $productItem, 
+            $partnerTag ?? $this->partnerTag, 
+            $trackingPlaceholder ?? $this->trackingPlaceholder
+        );
     }
 
     /**
@@ -329,20 +423,87 @@ class AmazonProductApiClient
      * @param array $asins Array of ASINs
      * @param array $resources Optional resources to retrieve
      * @param int $offerCount Number of offers to retrieve (default: 1)
-     * @param string $partnerTag Partner tag for tracking
-     * @param string $trackingPlaceholder Tracking placeholder
+     * @param string|null $partnerTag Partner tag for tracking (defaults to config value)
+     * @param string|null $trackingPlaceholder Tracking placeholder (defaults to config value)
      * @return AmazonItem[]
      * @throws AmazonApiException
      */
-    public function getAmazonItems(array $asins, array $resources = [], int $offerCount = 1, string $partnerTag = 'blazemedia-21', string $trackingPlaceholder = 'booBLZTRKood'): array
+    public function getAmazonItems(array $asins, array $resources = [], int $offerCount = 1, string $partnerTag = null, string $trackingPlaceholder = null): array
     {
         $productItems = $this->getItems($asins, $resources, $offerCount);
         
         $amazonItems = [];
         foreach ($productItems as $productItem) {
-            $amazonItems[] = new AmazonItem($productItem, $partnerTag, $trackingPlaceholder);
+            $amazonItems[] = new AmazonItem(
+                $productItem, 
+                $partnerTag ?? $this->partnerTag, 
+                $trackingPlaceholder ?? $this->trackingPlaceholder
+            );
         }
         
         return $amazonItems;
+    }
+
+    /**
+     * Load configuration from JSON file
+     * 
+     * @param string $configPath Path to the JSON configuration file
+     * @return array Configuration array
+     * @throws InvalidParameterException
+     */
+    private function loadConfigFromFile(string $configPath): array
+    {
+        if (!file_exists($configPath)) {
+            throw new InvalidParameterException("Configuration file not found: {$configPath}");
+        }
+
+        if (!is_readable($configPath)) {
+            throw new InvalidParameterException("Configuration file is not readable: {$configPath}");
+        }
+
+        $jsonContent = file_get_contents($configPath);
+        if ($jsonContent === false) {
+            throw new InvalidParameterException("Failed to read configuration file: {$configPath}");
+        }
+
+        try {
+            $config = json_decode($jsonContent, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
+            throw new InvalidParameterException("Invalid JSON in configuration file: {$e->getMessage()}");
+        }
+
+        if (!is_array($config)) {
+            throw new InvalidParameterException("Configuration file must contain a JSON object");
+        }
+
+        return $config;
+    }
+
+    /**
+     * Get marketplace from host
+     * 
+     * @param string $host The host (e.g., webservices.amazon.it)
+     * @return string The marketplace (e.g., www.amazon.it)
+     */
+    private function getMarketplaceFromHost(string $host): string
+    {
+        // Convert host to marketplace format
+        $hostToMarketplace = [
+            'webservices.amazon.com' => 'www.amazon.com',
+            'webservices.amazon.ca' => 'www.amazon.ca',
+            'webservices.amazon.com.mx' => 'www.amazon.com.mx',
+            'webservices.amazon.co.uk' => 'www.amazon.co.uk',
+            'webservices.amazon.de' => 'www.amazon.de',
+            'webservices.amazon.fr' => 'www.amazon.fr',
+            'webservices.amazon.it' => 'www.amazon.it',
+            'webservices.amazon.es' => 'www.amazon.es',
+            'webservices.amazon.co.jp' => 'www.amazon.co.jp',
+            'webservices.amazon.in' => 'www.amazon.in',
+            'webservices.amazon.com.br' => 'www.amazon.com.br',
+            'webservices.amazon.com.au' => 'www.amazon.com.au',
+            'webservices.amazon.sg' => 'www.amazon.sg',
+        ];
+
+        return $hostToMarketplace[$host] ?? $host;
     }
 }

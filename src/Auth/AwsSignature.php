@@ -81,7 +81,7 @@ class AwsSignature
         $canonicalQueryString = ''; // Empty for POST requests
         $canonicalHeaders = $this->getCanonicalHeaders($headers);
         $signedHeaders = $this->getSignedHeaders($headers);
-        $payloadHash = hash('sha256', $payload);
+        $payloadHash = $headers['X-Amz-Content-Sha256'] ?? hash('sha256', $payload);
 
         return $method . "\n" .
                $canonicalUri . "\n" .
@@ -102,7 +102,7 @@ class AwsSignature
         $canonicalHeaders = [];
         
         foreach ($headers as $name => $value) {
-            $canonicalHeaders[strtolower($name)] = trim($value);
+            $canonicalHeaders[strtolower(trim($name))] = preg_replace('/\s+/', ' ', trim($value));
         }
         
         ksort($canonicalHeaders);
@@ -123,7 +123,9 @@ class AwsSignature
      */
     private function getSignedHeaders(array $headers): string
     {
-        $headerNames = array_map('strtolower', array_keys($headers));
+        $headerNames = array_map(function($name) {
+            return strtolower(trim($name));
+        }, array_keys($headers));
         sort($headerNames);
         
         return implode(';', $headerNames);
@@ -144,5 +146,45 @@ class AwsSignature
         $signingKey = hash_hmac('sha256', 'aws4_request', $serviceKey, true);
         
         return hash_hmac('sha256', $stringToSign, $signingKey);
+    }
+
+    /**
+     * Debug method to help troubleshoot signature issues
+     * 
+     * @param string $method HTTP method
+     * @param string $uri Request URI
+     * @param string $payload Request payload
+     * @param string $timestamp ISO 8601 timestamp
+     * @param array $headers Request headers
+     * @return array Debug information
+     */
+    public function getDebugInfo(
+        string $method,
+        string $uri,
+        string $payload,
+        string $timestamp,
+        array $headers
+    ): array {
+        $date = substr($timestamp, 0, 8);
+        
+        $canonicalRequest = $this->createCanonicalRequest($method, $uri, $payload, $headers);
+        $credentialScope = $date . '/' . $this->region . '/' . $this->service . '/aws4_request';
+        $stringToSign = $this->algorithm . "\n" .
+                       $timestamp . "\n" .
+                       $credentialScope . "\n" .
+                       hash('sha256', $canonicalRequest);
+        
+        return [
+            'canonical_request' => $canonicalRequest,
+            'string_to_sign' => $stringToSign,
+            'credential_scope' => $credentialScope,
+            'canonical_headers' => $this->getCanonicalHeaders($headers),
+            'signed_headers' => $this->getSignedHeaders($headers),
+            'payload_hash' => $headers['X-Amz-Content-Sha256'] ?? hash('sha256', $payload),
+            'timestamp' => $timestamp,
+            'date' => $date,
+            'region' => $this->region,
+            'service' => $this->service
+        ];
     }
 }
