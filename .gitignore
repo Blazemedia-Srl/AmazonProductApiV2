@@ -113,6 +113,7 @@ credentials.json
 # Amazon API specific files that might contain sensitive data
 amazon-config.php
 paapi-credentials.php
+amazon-api-credentials.json
 
 # Examples with real credentials
 examples/config.php
