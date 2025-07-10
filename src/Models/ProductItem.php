@@ -122,51 +122,105 @@ class ProductItem
     }
 
     /**
-     * Get current price
+     * Get current price (always uses the lowest price from all offers)
      * 
      * @return Price|null
      */
     public function getPrice(): ?Price
     {
-        $offer = $this->getBuyBoxOffer();
+        $offers = $this->getAllOffers();
         
-        if (!$offer || !isset($offer['Price'])) {
+        if (empty($offers)) {
             return null;
         }
 
-        // Handle OffersV2 structure with nested Money object
-        if (isset($offer['Price']['Money'])) {
-            return new Price($offer['Price']['Money']);
+        $lowestPrice = null;
+        $lowestAmount = PHP_FLOAT_MAX;
+
+        foreach ($offers as $offer) {
+            $priceData = null;
+            
+            // Handle OffersV2 structure with nested Money object
+            if (isset($offer['Price']['Money'])) {
+                $priceData = $offer['Price']['Money'];
+            }
+            // Handle Offers structure (direct price object)
+            elseif (isset($offer['Price'])) {
+                $priceData = $offer['Price'];
+            }
+            
+            if ($priceData && isset($priceData['Amount'])) {
+                if ($priceData['Amount'] < $lowestAmount) {
+                    $lowestAmount = $priceData['Amount'];
+                    $lowestPrice = $priceData;
+                }
+            }
         }
-        
-        // Handle Offers structure (direct price object)
-        return new Price($offer['Price']);
+
+        return $lowestPrice ? new Price($lowestPrice) : null;
     }
 
     /**
-     * Get original price (before discount)
+     * Get original price (uses SavingBasis if greater than current price, otherwise highest price from Summaries)
      * 
      * @return Price|null
      */
     public function getOriginalPrice(): ?Price
     {
-        $offer = $this->getBuyBoxOffer();
-        
-        if (!$offer) {
-            return $this->getPrice();
-        }
-
-        // Handle OffersV2 structure with nested SavingBasis
-        if (isset($offer['Price']['SavingBasis']['Money'])) {
-            return new Price($offer['Price']['SavingBasis']['Money']);
+        $currentPrice = $this->getPrice();
+        if (!$currentPrice) {
+            return null;
         }
         
-        // Handle Offers structure with direct SavingBasis
-        if (isset($offer['SavingBasis'])) {
-            return new Price($offer['SavingBasis']);
-        }
+        $currentAmount = $currentPrice->getAmount();
+        $originalPrice = null;
+        $originalAmount = 0;
 
-        return $this->getPrice();
+        // First, check for SavingBasis in all offers and find the highest one
+        $offers = $this->getAllOffers();
+        foreach ($offers as $offer) {
+            $savingBasisData = null;
+            
+            // Handle OffersV2 structure with nested SavingBasis
+            if (isset($offer['Price']['SavingBasis']['Money'])) {
+                $savingBasisData = $offer['Price']['SavingBasis']['Money'];
+            }
+            // Handle Offers structure with direct SavingBasis
+            elseif (isset($offer['SavingBasis'])) {
+                $savingBasisData = $offer['SavingBasis'];
+            }
+            
+            if ($savingBasisData && isset($savingBasisData['Amount']) && $savingBasisData['Amount'] > $currentAmount) {
+                if ($savingBasisData['Amount'] > $originalAmount) {
+                    $originalAmount = $savingBasisData['Amount'];
+                    $originalPrice = $savingBasisData;
+                }
+            }
+        }
+        
+        // If we found a valid SavingBasis, use it
+        if ($originalPrice) {
+            return new Price($originalPrice);
+        }
+        
+        // Otherwise, look for the highest price in Summaries
+        $summaries = $this->data['Offers']['Summaries'] ?? $this->data['OffersV2']['Summaries'] ?? [];
+        foreach ($summaries as $summary) {
+            if (isset($summary['HighestPrice']) && isset($summary['HighestPrice']['Amount'])) {
+                if ($summary['HighestPrice']['Amount'] > $currentAmount && $summary['HighestPrice']['Amount'] > $originalAmount) {
+                    $originalAmount = $summary['HighestPrice']['Amount'];
+                    $originalPrice = $summary['HighestPrice'];
+                }
+            }
+        }
+        
+        // If we found a valid Summaries price, use it
+        if ($originalPrice) {
+            return new Price($originalPrice);
+        }
+        
+        // Fallback to current price if no better original price found
+        return $currentPrice;
     }
 
     /**
@@ -230,26 +284,31 @@ class ProductItem
     }
 
     /**
-     * Check if product has Prime eligibility
+     * Check if product has Prime eligibility (checks all offers)
      * 
      * @return bool
      */
     public function hasPrimeOffer(): bool
     {
-        $offer = $this->getBuyBoxOffer();
+        $offers = $this->getAllOffers();
         
-        // Check for Prime exclusive deal in new API structure
-        if ($offer && isset($offer['DealDetails']['AccessType'])) {
-            return $offer['DealDetails']['AccessType'] === 'PRIME_EXCLUSIVE';
-        }
-        
-        // Check old API structure
-        if (!$offer || !isset($offer['ProgramEligibility']['IsPrimeExclusive'])) {
-            return false;
+        foreach ($offers as $offer) {
+            // Check for Prime exclusive deal in new API structure
+            if (isset($offer['DealDetails']['AccessType']) && $offer['DealDetails']['AccessType'] === 'PRIME_EXCLUSIVE') {
+                return true;
+            }
+            
+            // Check old API structure
+            if (isset($offer['ProgramEligibility']['IsPrimeExclusive']) && $offer['ProgramEligibility']['IsPrimeExclusive'] === true) {
+                return true;
+            }
+            
+            if (isset($offer['ProgramEligibility']['IsPrimeEligible']) && $offer['ProgramEligibility']['IsPrimeEligible'] === true) {
+                return true;
+            }
         }
 
-        return $offer['ProgramEligibility']['IsPrimeExclusive'] === true ||
-               $offer['ProgramEligibility']['IsPrimeEligible'] === true;
+        return false;
     }
 
     /**
@@ -372,38 +431,51 @@ class ProductItem
     }
 
     /**
-     * Get product availability
+     * Get product availability (returns the first available stock message found)
      * 
      * @return string|null
      */
     public function getAvailability(): ?string
     {
-        $offer = $this->getBuyBoxOffer();
-        return $offer['Availability']['Message'] ?? null;
+        $offers = $this->getAllOffers();
+        
+        foreach ($offers as $offer) {
+            if (isset($offer['Availability']['Message'])) {
+                return $offer['Availability']['Message'];
+            }
+        }
+        
+        return null;
     }
 
     /**
-     * Check if product is in stock
+     * Check if product is in stock (checks all offers)
      * 
      * @return bool
      */
     public function isInStock(): bool
     {
-        $offer = $this->getBuyBoxOffer();
+        $offers = $this->getAllOffers();
         
-        if (!$offer || !isset($offer['Availability'])) {
-            return false;
-        }
+        foreach ($offers as $offer) {
+            if (!isset($offer['Availability'])) {
+                continue;
+            }
 
-        // Check Type field (preferred)
-        if (isset($offer['Availability']['Type'])) {
-            return $offer['Availability']['Type'] === 'Now';
-        }
-        
-        // Check Message field as fallback
-        if (isset($offer['Availability']['Message'])) {
-            $message = strtolower($offer['Availability']['Message']);
-            return strpos($message, 'in stock') !== false;
+            // Check Type field (preferred)
+            if (isset($offer['Availability']['Type'])) {
+                if ($offer['Availability']['Type'] === 'Now') {
+                    return true;
+                }
+            }
+            
+            // Check Message field as fallback
+            if (isset($offer['Availability']['Message'])) {
+                $message = strtolower($offer['Availability']['Message']);
+                if (strpos($message, 'in stock') !== false) {
+                    return true;
+                }
+            }
         }
 
         return false;
@@ -502,6 +574,43 @@ class ProductItem
         
         // Return null if no buy box winner found (stricter behavior)
         return null;
+    }
+
+    /**
+     * Get the best offer (lowest price offer)
+     * 
+     * @return array|null
+     */
+    public function getBestOffer(): ?array
+    {
+        $offers = $this->getAllOffers();
+        
+        if (empty($offers)) {
+            return null;
+        }
+
+        $bestOffer = null;
+        $lowestAmount = PHP_FLOAT_MAX;
+
+        foreach ($offers as $offer) {
+            $priceAmount = null;
+            
+            // Handle OffersV2 structure with nested Money object
+            if (isset($offer['Price']['Money']['Amount'])) {
+                $priceAmount = $offer['Price']['Money']['Amount'];
+            }
+            // Handle Offers structure (direct price object)
+            elseif (isset($offer['Price']['Amount'])) {
+                $priceAmount = $offer['Price']['Amount'];
+            }
+            
+            if ($priceAmount !== null && $priceAmount < $lowestAmount) {
+                $lowestAmount = $priceAmount;
+                $bestOffer = $offer;
+            }
+        }
+
+        return $bestOffer;
     }
 
     /**

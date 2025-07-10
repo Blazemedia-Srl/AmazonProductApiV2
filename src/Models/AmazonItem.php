@@ -240,4 +240,84 @@ class AmazonItem
     {
         return property_exists($this, $name);
     }
+
+    /**
+     * Get brand
+     * 
+     * @return string|null
+     */
+    public function getBrand(): ?string
+    {
+        return $this->item->getBrand();
+    }
+
+    /**
+     * Check if product is in stock
+     * 
+     * @return bool
+     */
+    public function isInStock(): bool
+    {
+        return $this->item->isInStock();
+    }
+
+    /**
+     * Get availability message
+     * 
+     * @return string|null
+     */
+    public function getAvailability(): ?string
+    {
+        return $this->item->getAvailability();
+    }
+
+    /**
+     * Check if product has active deal
+     * 
+     * @return bool
+     */
+    public function hasActiveDeal(): bool
+    {
+        return $this->item->hasActiveDeal();
+    }
+
+    /**
+     * Check if product has Prime offer
+     * 
+     * @return bool
+     */
+    public function hasPrimeOffer(): bool
+    {
+        return $this->item->hasPrimeOffer();
+    }
+
+    /**
+     * Get product URL
+     * 
+     * @return string|null
+     */
+    public function getUrl(): ?string
+    {
+        return $this->link;
+    }
+
+    /**
+     * Get partner tag
+     * 
+     * @return string
+     */
+    public function getPartnerTag(): string
+    {
+        return $this->partnerTag;
+    }
+
+    /**
+     * Get tracking ID/placeholder
+     * 
+     * @return string
+     */
+    public function getTrackingId(): string
+    {
+        return $this->trackingPlaceholder;
+    }
 }
