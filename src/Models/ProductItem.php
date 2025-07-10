@@ -134,12 +134,12 @@ class ProductItem
             return null;
         }
 
-        // Handle new API structure (OffersV2) with nested Money object
+        // Handle OffersV2 structure with nested Money object
         if (isset($offer['Price']['Money'])) {
             return new Price($offer['Price']['Money']);
         }
         
-        // Handle old API structure
+        // Handle Offers structure (direct price object)
         return new Price($offer['Price']);
     }
 
@@ -156,12 +156,12 @@ class ProductItem
             return $this->getPrice();
         }
 
-        // Handle new API structure (OffersV2) with nested SavingBasis
+        // Handle OffersV2 structure with nested SavingBasis
         if (isset($offer['Price']['SavingBasis']['Money'])) {
             return new Price($offer['Price']['SavingBasis']['Money']);
         }
         
-        // Handle old API structure
+        // Handle Offers structure with direct SavingBasis
         if (isset($offer['SavingBasis'])) {
             return new Price($offer['SavingBasis']);
         }
@@ -178,12 +178,12 @@ class ProductItem
     {
         $offer = $this->getBuyBoxOffer();
         
-        // Handle new API structure (OffersV2) with direct savings information
+        // Handle OffersV2 structure with direct savings information
         if ($offer && isset($offer['Price']['Savings']['Money'])) {
             return new Price($offer['Price']['Savings']['Money']);
         }
         
-        // Fallback to calculation method
+        // Fallback to calculation method for both Offers and OffersV2
         $original = $this->getOriginalPrice();
         $current = $this->getPrice();
         
@@ -213,12 +213,12 @@ class ProductItem
     {
         $offer = $this->getBuyBoxOffer();
         
-        // Handle new API structure (OffersV2) with direct percentage information
+        // Handle OffersV2 structure with direct percentage information
         if ($offer && isset($offer['Price']['Savings']['Percentage'])) {
             return (float) $offer['Price']['Savings']['Percentage'];
         }
         
-        // Fallback to calculation method
+        // Fallback to calculation method for both Offers and OffersV2
         $original = $this->getOriginalPrice();
         $current = $this->getPrice();
         
@@ -226,7 +226,7 @@ class ProductItem
             return null;
         }
 
-        return round((($original->getAmount() - $current->getAmount()) / $original->getAmount()) * 100, 2);
+        return round((($original->getAmount() - $current->getAmount()) / $original->getAmount()) * 100, 1);
     }
 
     /**
@@ -260,7 +260,15 @@ class ProductItem
     public function hasActiveDeal(): bool
     {
         $offer = $this->getBuyBoxOffer();
-        return $offer && isset($offer['DealDetails']);
+        
+        // Check for explicit deal details first
+        if ($offer && isset($offer['DealDetails'])) {
+            return true;
+        }
+        
+        // Check for savings as indicator of deal
+        $discountAmount = $this->getDiscountAmount();
+        return $discountAmount !== null && $discountAmount->getAmount() > 0;
     }
 
     /**
@@ -383,11 +391,22 @@ class ProductItem
     {
         $offer = $this->getBuyBoxOffer();
         
-        if (!$offer || !isset($offer['Availability']['Type'])) {
+        if (!$offer || !isset($offer['Availability'])) {
             return false;
         }
 
-        return $offer['Availability']['Type'] === 'Now';
+        // Check Type field (preferred)
+        if (isset($offer['Availability']['Type'])) {
+            return $offer['Availability']['Type'] === 'Now';
+        }
+        
+        // Check Message field as fallback
+        if (isset($offer['Availability']['Message'])) {
+            $message = strtolower($offer['Availability']['Message']);
+            return strpos($message, 'in stock') !== false;
+        }
+
+        return false;
     }
 
     /**
@@ -462,8 +481,8 @@ class ProductItem
      */
     public function getAllOffers(): array
     {
-        // Support both old and new API response structures
-        return $this->data['OffersV2']['Listings'] ?? $this->data['Offers']['Listings'] ?? [];
+        // Prioritize Offers over OffersV2 as per resource configuration
+        return $this->data['Offers']['Listings'] ?? $this->data['OffersV2']['Listings'] ?? [];
     }
 
     /**
@@ -481,8 +500,8 @@ class ProductItem
             }
         }
         
-        // Return first offer if no buy box winner found
-        return $offers[0] ?? null;
+        // Return null if no buy box winner found (stricter behavior)
+        return null;
     }
 
     /**

@@ -438,7 +438,14 @@ class ProductItemTest extends TestCase
         $array = $item->toArray();
         
         $this->assertIsArray($array);
-        $this->assertEquals($this->sampleData, $array);
+        // toArray() returns processed data, not raw data
+        $this->assertEquals('B08N5WRWNW', $array['asin']);
+        $this->assertEquals('Test Product Title', $array['title']);
+        $this->assertEquals('Test Brand', $array['brand']);
+        $this->assertEquals('Test Manufacturer', $array['manufacturer']);
+        $this->assertTrue($array['has_active_deal']);
+        $this->assertTrue($array['is_in_stock']);
+        $this->assertEquals(25.0, $array['discount_percentage']);
     }
 
     /**

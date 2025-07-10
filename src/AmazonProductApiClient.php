@@ -55,6 +55,7 @@ class AmazonProductApiClient
 
     /**
      * Default resources to retrieve (valid PAAPI5 resources)
+     * Note: Offers resources are prioritized before OffersV2 for price information
      */
     private const DEFAULT_RESOURCES = [
         "ItemInfo.Title",
@@ -68,6 +69,14 @@ class AmazonProductApiClient
         "Images.Variants.Small",
         "Images.Variants.Medium",
         "Images.Variants.Large",
+        // Offers resources (prioritized for price information)
+        "Offers.Listings.Price",
+        "Offers.Listings.DeliveryInfo.IsAmazonFulfilled",
+        "Offers.Listings.MerchantInfo",
+        "Offers.Listings.SavingBasis",
+        "Offers.Summaries.HighestPrice",
+        "Offers.Summaries.LowestPrice",
+        // OffersV2 resources (fallback for additional offer details)
         "OffersV2.Listings.Price",
         "OffersV2.Listings.DealDetails",
         "OffersV2.Listings.IsBuyBoxWinner",
