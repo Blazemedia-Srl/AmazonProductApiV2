@@ -547,14 +547,31 @@ class ProductItem
     }
 
     /**
-     * Get all offers
+     * Get all offers (merges both Offers V1 and OffersV2)
      * 
      * @return array
      */
     public function getAllOffers(): array
     {
-        // Prioritize Offers over OffersV2 as per resource configuration
-        return $this->data['Offers']['Listings'] ?? $this->data['OffersV2']['Listings'] ?? [];
+        $allOffers = [];
+        
+        // Add Offers V1
+        if (isset($this->data['Offers']['Listings']) && is_array($this->data['Offers']['Listings'])) {
+            foreach ($this->data['Offers']['Listings'] as $offer) {
+                $offer['_source'] = 'OffersV1';
+                $allOffers[] = $offer;
+            }
+        }
+        
+        // Add OffersV2
+        if (isset($this->data['OffersV2']['Listings']) && is_array($this->data['OffersV2']['Listings'])) {
+            foreach ($this->data['OffersV2']['Listings'] as $offer) {
+                $offer['_source'] = 'OffersV2';
+                $allOffers[] = $offer;
+            }
+        }
+        
+        return $allOffers;
     }
 
     /**
