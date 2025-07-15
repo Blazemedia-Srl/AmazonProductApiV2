@@ -180,6 +180,7 @@ class AmazonProductApiClient
             'ItemIds' => $asins,
             'ItemIdType' => 'ASIN',
             'Marketplace' => $this->marketplace,
+            'LanguagesOfPreference'=> ["it_IT"],
             'PartnerTag' => $this->partnerTag,
             'PartnerType' => 'Associates',
             'OfferCount' => $offerCount,
