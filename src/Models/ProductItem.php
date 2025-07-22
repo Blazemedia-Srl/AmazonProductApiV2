@@ -122,7 +122,7 @@ class ProductItem
     }
 
     /**
-     * Get current price (always uses the lowest price from all offers)
+     * Get current price (always uses the lowest price from all offers, excluding periodic/recurring prices)
      * 
      * @return Price|null
      */
@@ -138,6 +138,25 @@ class ProductItem
         $lowestAmount = PHP_FLOAT_MAX;
 
         foreach ($offers as $offer) {
+            // Skip periodic/recurring prices (Subscribe & Save)
+            if (isset($offer['Type']) && $offer['Type'] === 'SUBSCRIBE_AND_SAVE') {
+                continue;
+            }
+            
+            // Skip offers with promotions of type "SNS" (Subscribe and Save)
+            if (isset($offer['Promotions'])) {
+                $hasSubscribeAndSave = false;
+                foreach ($offer['Promotions'] as $promotion) {
+                    if (isset($promotion['Type']) && $promotion['Type'] === 'SNS') {
+                        $hasSubscribeAndSave = true;
+                        break;
+                    }
+                }
+                if ($hasSubscribeAndSave) {
+                    continue;
+                }
+            }
+            
             $priceData = null;
             
             // Handle OffersV2 structure with nested Money object
@@ -594,7 +613,7 @@ class ProductItem
     }
 
     /**
-     * Get the best offer (lowest price offer)
+     * Get the best offer (lowest price offer, excluding periodic/recurring prices)
      * 
      * @return array|null
      */
@@ -610,6 +629,25 @@ class ProductItem
         $lowestAmount = PHP_FLOAT_MAX;
 
         foreach ($offers as $offer) {
+            // Skip periodic/recurring prices (Subscribe & Save)
+            if (isset($offer['Type']) && $offer['Type'] === 'SUBSCRIBE_AND_SAVE') {
+                continue;
+            }
+            
+            // Skip offers with promotions of type "SNS" (Subscribe and Save)
+            if (isset($offer['Promotions'])) {
+                $hasSubscribeAndSave = false;
+                foreach ($offer['Promotions'] as $promotion) {
+                    if (isset($promotion['Type']) && $promotion['Type'] === 'SNS') {
+                        $hasSubscribeAndSave = true;
+                        break;
+                    }
+                }
+                if ($hasSubscribeAndSave) {
+                    continue;
+                }
+            }
+            
             $priceAmount = null;
             
             // Handle OffersV2 structure with nested Money object
