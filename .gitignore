@@ -231,3 +231,5 @@ examples/my_*.php
 examples/test_real_*.php
 my-config.*
 real-credentials.*
+
+*.Identifier
