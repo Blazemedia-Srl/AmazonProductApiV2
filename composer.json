@@ -19,7 +19,8 @@
     },
     "autoload": {
         "psr-4": {
-            "Blazemedia\\AmazonProductApiV2\\": "src/"
+            "Blazemedia\\AmazonProductApiV2\\": "src/",
+            "Amazon\\CreatorsAPI\\v1\\": "creatorsapi-php-sdk/src/"
         }
     },
     "autoload-dev": {
