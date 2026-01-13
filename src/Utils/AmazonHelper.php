@@ -17,7 +17,7 @@ use Blazemedia\AmazonProductApiV2\Exceptions\AmazonApiException;
 class AmazonHelper
 {
     private AmazonProductApiClient $client;
-    
+
     public function __construct(AmazonProductApiClient $client)
     {
         $this->client = $client;
@@ -33,7 +33,7 @@ class AmazonHelper
     {
         try {
             $product = $this->client->getItem($asin);
-            
+
             return [
                 'success' => true,
                 'asin' => $product->getAsin(),
@@ -47,7 +47,6 @@ class AmazonHelper
                 'in_stock' => $product->isInStock(),
                 'url' => $product->getDetailPageURL()
             ];
-            
         } catch (AmazonApiException $e) {
             return [
                 'success' => false,
@@ -66,14 +65,14 @@ class AmazonHelper
     public function compareProducts(array $asins): array
     {
         $results = [];
-        
+
         try {
             $products = $this->client->getItems($asins);
-            
+
             foreach ($products as $product) {
                 $price = $product->getPrice();
                 $originalPrice = $product->getOriginalPrice();
-                
+
                 $results[] = [
                     'asin' => $product->getAsin(),
                     'title' => $product->getTitle(),
@@ -86,19 +85,18 @@ class AmazonHelper
                     'in_stock' => $product->isInStock()
                 ];
             }
-            
+
             // Ordina per prezzo crescente
-            usort($results, function($a, $b) {
+            usort($results, function ($a, $b) {
                 return $a['current_price'] <=> $b['current_price'];
             });
-            
         } catch (AmazonApiException $e) {
             return [
                 'error' => $e->getMessage(),
                 'products' => []
             ];
         }
-        
+
         return [
             'products' => $results,
             'count' => count($results)
@@ -115,17 +113,17 @@ class AmazonHelper
     public function findDiscountedProducts(array $asins, float $minDiscountPercentage = 10.0): array
     {
         $discounted = [];
-        
+
         try {
             $products = $this->client->getItems($asins);
-            
+
             foreach ($products as $product) {
                 $discount = $product->getDiscountPercentage();
-                
+
                 if ($discount && $discount >= $minDiscountPercentage) {
                     $price = $product->getPrice();
                     $originalPrice = $product->getOriginalPrice();
-                    
+
                     $discounted[] = [
                         'asin' => $product->getAsin(),
                         'title' => $product->getTitle(),
@@ -138,19 +136,18 @@ class AmazonHelper
                     ];
                 }
             }
-            
+
             // Ordina per sconto decrescente
-            usort($discounted, function($a, $b) {
+            usort($discounted, function ($a, $b) {
                 return $b['discount_percentage'] <=> $a['discount_percentage'];
             });
-            
         } catch (AmazonApiException $e) {
             return [
                 'error' => $e->getMessage(),
                 'products' => []
             ];
         }
-        
+
         return [
             'products' => $discounted,
             'count' => count($discounted)
@@ -166,14 +163,14 @@ class AmazonHelper
     public function findPrimeProducts(array $asins): array
     {
         $primeProducts = [];
-        
+
         try {
             $products = $this->client->getItems($asins);
-            
+
             foreach ($products as $product) {
                 if ($product->hasPrimeOffer()) {
                     $price = $product->getPrice();
-                    
+
                     $primeProducts[] = [
                         'asin' => $product->getAsin(),
                         'title' => $product->getTitle(),
@@ -185,14 +182,13 @@ class AmazonHelper
                     ];
                 }
             }
-            
         } catch (AmazonApiException $e) {
             return [
                 'error' => $e->getMessage(),
                 'products' => []
             ];
         }
-        
+
         return [
             'products' => $primeProducts,
             'count' => count($primeProducts)
@@ -209,7 +205,7 @@ class AmazonHelper
     {
         try {
             $product = $this->client->getItem($asin);
-            
+
             $report = [
                 'basic_info' => [
                     'asin' => $product->getAsin(),
@@ -249,12 +245,11 @@ class AmazonHelper
                 ],
                 'generated_at' => date('Y-m-d H:i:s')
             ];
-            
+
             return [
                 'success' => true,
                 'report' => $report
             ];
-            
         } catch (AmazonApiException $e) {
             return [
                 'success' => false,
@@ -276,18 +271,86 @@ class AmazonHelper
     {
         try {
             $amazonItem = $this->client->getAmazonItem($asin, [], 1, $partnerTag, $trackingPlaceholder);
-            
+
             return [
                 'success' => true,
                 'item' => $amazonItem,
                 'data' => $amazonItem->toArray()
             ];
-            
         } catch (AmazonApiException $e) {
             return [
                 'success' => false,
                 'error' => $e->getMessage(),
                 'code' => $e->getCode()
+            ];
+        }
+    }
+
+    /**
+     * Cerca prodotti per parola chiave restituendo oggetti AmazonItem
+     * 
+     * @param string $keywords
+     * @param int $limit
+     * @param string $partnerTag
+     * @param string $trackingPlaceholder
+     * @return array
+     */
+    public function findProducts(string $keywords, int $limit = 10, string $partnerTag = 'blazemedia-21', string $trackingPlaceholder = 'booBLZTRKood'): array
+    {
+        try {
+            $products = $this->client->searchItems($keywords);
+            $results = [];
+
+            foreach (array_slice($products, 0, $limit) as $product) {
+                $results[] = new AmazonItem($product, $partnerTag, $trackingPlaceholder);
+            }
+
+            return [
+                'success' => true,
+                'count' => count($results),
+                'results' => $results
+            ];
+        } catch (AmazonApiException $e) {
+            return [
+                'success' => false,
+                'error' => $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Ottieni i feed disponibili tramite la nuova Creators API
+     * 
+     * @param array $creatorsConfig Credenziali OAuth2 (credentialId, credentialSecret, version)
+     * @param string $marketplace Marketplace Amazon (es. www.amazon.it)
+     * @return array
+     */
+    public function getCreatorsFeeds(array $creatorsConfig, string $marketplace = 'www.amazon.it'): array
+    {
+        try {
+            $api = $this->client->getCreatorsApi($creatorsConfig);
+            $response = $api->listFeeds($marketplace);
+
+            $feeds = [];
+            if ($response->getFeeds()) {
+                foreach ($response->getFeeds() as $feed) {
+                    $feeds[] = [
+                        'name' => $feed->getFeedName(),
+                        'size' => $feed->getSize(),
+                        'last_updated' => $feed->getLastUpdated(),
+                        'md5' => $feed->getMd5()
+                    ];
+                }
+            }
+
+            return [
+                'success' => true,
+                'feeds' => $feeds
+            ];
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'error' => $e->getMessage()
             ];
         }
     }
@@ -348,13 +411,13 @@ class AmazonHelper
             '/asin=([A-Z0-9]{10})/',
             '/\/([A-Z0-9]{10})(?:\/|\?|$)/'
         ];
-        
+
         foreach ($patterns as $pattern) {
             if (preg_match($pattern, $url, $matches)) {
                 return $matches[1];
             }
         }
-        
+
         return null;
     }
 

@@ -83,8 +83,36 @@ class ProductItem
         return $this->data['ItemInfo']['ByLineInfo']['Manufacturer']['DisplayValue'] ?? null;
     }
 
+    /**     * Get content rating (e.g., adult product)
+     * 
+     * @return string|null
+     */
+    public function getContentRating(): ?string
+    {
+        return $this->data['ItemInfo']['ContentRating']['DisplayValue'] ?? null;
+    }
+
     /**
-     * Get primary image URL
+     * Check if product is adult content
+     * 
+     * @return bool
+     */
+    public function isAdultProduct(): bool
+    {
+        return ($this->getContentRating() === 'Adult');
+    }
+
+    /**
+     * Get external IDs (UPC, EAN, ISBN)
+     * 
+     * @return array
+     */
+    public function getExternalIds(): array
+    {
+        return $this->data['ItemInfo']['ExternalIds'] ?? [];
+    }
+
+    /**     * Get primary image URL
      * 
      * @param string $size Image size (Small, Medium, Large)
      * @return string|null
@@ -103,12 +131,12 @@ class ProductItem
     public function getAllImages(string $size = 'Large'): array
     {
         $images = [];
-        
+
         // Primary image
         if (isset($this->data['Images']['Primary'][$size]['URL'])) {
             $images[] = $this->data['Images']['Primary'][$size]['URL'];
         }
-        
+
         // Variant images
         if (isset($this->data['Images']['Variants'])) {
             foreach ($this->data['Images']['Variants'] as $variant) {
@@ -117,7 +145,7 @@ class ProductItem
                 }
             }
         }
-        
+
         return $images;
     }
 
@@ -129,7 +157,7 @@ class ProductItem
     public function getPrice(): ?Price
     {
         $offers = $this->getAllOffers();
-        
+
         if (empty($offers)) {
             return null;
         }
@@ -142,7 +170,7 @@ class ProductItem
             if (isset($offer['Type']) && $offer['Type'] === 'SUBSCRIBE_AND_SAVE') {
                 continue;
             }
-            
+
             // Skip offers with promotions of type "SNS" (Subscribe and Save)
             if (isset($offer['Promotions'])) {
                 $hasSubscribeAndSave = false;
@@ -156,9 +184,9 @@ class ProductItem
                     continue;
                 }
             }
-            
+
             $priceData = null;
-            
+
             // Handle OffersV2 structure with nested Money object
             if (isset($offer['Price']['Money'])) {
                 $priceData = $offer['Price']['Money'];
@@ -167,7 +195,7 @@ class ProductItem
             elseif (isset($offer['Price'])) {
                 $priceData = $offer['Price'];
             }
-            
+
             if ($priceData && isset($priceData['Amount'])) {
                 if ($priceData['Amount'] < $lowestAmount) {
                     $lowestAmount = $priceData['Amount'];
@@ -190,7 +218,7 @@ class ProductItem
         if (!$currentPrice) {
             return null;
         }
-        
+
         $currentAmount = $currentPrice->getAmount();
         $originalPrice = null;
         $originalAmount = 0;
@@ -199,7 +227,7 @@ class ProductItem
         $offers = $this->getAllOffers();
         foreach ($offers as $offer) {
             $savingBasisData = null;
-            
+
             // Handle OffersV2 structure with nested SavingBasis
             if (isset($offer['Price']['SavingBasis']['Money'])) {
                 $savingBasisData = $offer['Price']['SavingBasis']['Money'];
@@ -208,7 +236,7 @@ class ProductItem
             elseif (isset($offer['SavingBasis'])) {
                 $savingBasisData = $offer['SavingBasis'];
             }
-            
+
             if ($savingBasisData && isset($savingBasisData['Amount']) && $savingBasisData['Amount'] > $currentAmount) {
                 if ($savingBasisData['Amount'] > $originalAmount) {
                     $originalAmount = $savingBasisData['Amount'];
@@ -216,12 +244,12 @@ class ProductItem
                 }
             }
         }
-        
+
         // If we found a valid SavingBasis, use it
         if ($originalPrice) {
             return new Price($originalPrice);
         }
-        
+
         // Otherwise, look for the highest price in Summaries
         $summaries = $this->data['Offers']['Summaries'] ?? $this->data['OffersV2']['Summaries'] ?? [];
         foreach ($summaries as $summary) {
@@ -232,12 +260,12 @@ class ProductItem
                 }
             }
         }
-        
+
         // If we found a valid Summaries price, use it
         if ($originalPrice) {
             return new Price($originalPrice);
         }
-        
+
         // Fallback to current price if no better original price found
         return $currentPrice;
     }
@@ -250,22 +278,22 @@ class ProductItem
     public function getDiscountAmount(): ?Price
     {
         $offer = $this->getBuyBoxOffer();
-        
+
         // Handle OffersV2 structure with direct savings information
         if ($offer && isset($offer['Price']['Savings']['Money'])) {
             return new Price($offer['Price']['Savings']['Money']);
         }
-        
+
         // Fallback to calculation method for both Offers and OffersV2
         $original = $this->getOriginalPrice();
         $current = $this->getPrice();
-        
+
         if (!$original || !$current) {
             return null;
         }
 
         $discountAmount = $original->getAmount() - $current->getAmount();
-        
+
         if ($discountAmount <= 0) {
             return null;
         }
@@ -285,16 +313,16 @@ class ProductItem
     public function getDiscountPercentage(): ?float
     {
         $offer = $this->getBuyBoxOffer();
-        
+
         // Handle OffersV2 structure with direct percentage information
         if ($offer && isset($offer['Price']['Savings']['Percentage'])) {
             return (float) $offer['Price']['Savings']['Percentage'];
         }
-        
+
         // Fallback to calculation method for both Offers and OffersV2
         $original = $this->getOriginalPrice();
         $current = $this->getPrice();
-        
+
         if (!$original || !$current || $original->getAmount() <= 0) {
             return null;
         }
@@ -310,18 +338,18 @@ class ProductItem
     public function hasPrimeOffer(): bool
     {
         $offers = $this->getAllOffers();
-        
+
         foreach ($offers as $offer) {
             // Check for Prime exclusive deal in new API structure
             if (isset($offer['DealDetails']['AccessType']) && $offer['DealDetails']['AccessType'] === 'PRIME_EXCLUSIVE') {
                 return true;
             }
-            
+
             // Check old API structure
             if (isset($offer['ProgramEligibility']['IsPrimeExclusive']) && $offer['ProgramEligibility']['IsPrimeExclusive'] === true) {
                 return true;
             }
-            
+
             if (isset($offer['ProgramEligibility']['IsPrimeEligible']) && $offer['ProgramEligibility']['IsPrimeEligible'] === true) {
                 return true;
             }
@@ -338,12 +366,12 @@ class ProductItem
     public function hasActiveDeal(): bool
     {
         $offer = $this->getBuyBoxOffer();
-        
+
         // Check for explicit deal details first
         if ($offer && isset($offer['DealDetails'])) {
             return true;
         }
-        
+
         // Check for savings as indicator of deal
         $discountAmount = $this->getDiscountAmount();
         return $discountAmount !== null && $discountAmount->getAmount() > 0;
@@ -457,13 +485,13 @@ class ProductItem
     public function getAvailability(): ?string
     {
         $offers = $this->getAllOffers();
-        
+
         foreach ($offers as $offer) {
             if (isset($offer['Availability']['Message'])) {
                 return $offer['Availability']['Message'];
             }
         }
-        
+
         return null;
     }
 
@@ -475,7 +503,7 @@ class ProductItem
     public function isInStock(): bool
     {
         $offers = $this->getAllOffers();
-        
+
         foreach ($offers as $offer) {
             if (!isset($offer['Availability'])) {
                 continue;
@@ -487,7 +515,7 @@ class ProductItem
                     return true;
                 }
             }
-            
+
             // Check Message field as fallback
             if (isset($offer['Availability']['Message'])) {
                 $message = strtolower($offer['Availability']['Message']);
@@ -573,7 +601,7 @@ class ProductItem
     public function getAllOffers(): array
     {
         $allOffers = [];
-        
+
         // Add Offers V1
         if (isset($this->data['Offers']['Listings']) && is_array($this->data['Offers']['Listings'])) {
             foreach ($this->data['Offers']['Listings'] as $offer) {
@@ -581,7 +609,7 @@ class ProductItem
                 $allOffers[] = $offer;
             }
         }
-        
+
         // Add OffersV2
         if (isset($this->data['OffersV2']['Listings']) && is_array($this->data['OffersV2']['Listings'])) {
             foreach ($this->data['OffersV2']['Listings'] as $offer) {
@@ -589,7 +617,7 @@ class ProductItem
                 $allOffers[] = $offer;
             }
         }
-        
+
         return $allOffers;
     }
 
@@ -601,13 +629,13 @@ class ProductItem
     public function getBuyBoxOffer(): ?array
     {
         $offers = $this->getAllOffers();
-        
+
         foreach ($offers as $offer) {
             if (isset($offer['IsBuyBoxWinner']) && $offer['IsBuyBoxWinner'] === true) {
                 return $offer;
             }
         }
-        
+
         // Return null if no buy box winner found (stricter behavior)
         return null;
     }
@@ -620,7 +648,7 @@ class ProductItem
     public function getBestOffer(): ?array
     {
         $offers = $this->getAllOffers();
-        
+
         if (empty($offers)) {
             return null;
         }
@@ -633,7 +661,7 @@ class ProductItem
             if (isset($offer['Type']) && $offer['Type'] === 'SUBSCRIBE_AND_SAVE') {
                 continue;
             }
-            
+
             // Skip offers with promotions of type "SNS" (Subscribe and Save)
             if (isset($offer['Promotions'])) {
                 $hasSubscribeAndSave = false;
@@ -647,9 +675,9 @@ class ProductItem
                     continue;
                 }
             }
-            
+
             $priceAmount = null;
-            
+
             // Handle OffersV2 structure with nested Money object
             if (isset($offer['Price']['Money']['Amount'])) {
                 $priceAmount = $offer['Price']['Money']['Amount'];
@@ -658,7 +686,7 @@ class ProductItem
             elseif (isset($offer['Price']['Amount'])) {
                 $priceAmount = $offer['Price']['Amount'];
             }
-            
+
             if ($priceAmount !== null && $priceAmount < $lowestAmount) {
                 $lowestAmount = $priceAmount;
                 $bestOffer = $offer;
@@ -730,7 +758,7 @@ class ProductItem
         $price = $this->getPrice();
         $originalPrice = $this->getOriginalPrice();
         $discountAmount = $this->getDiscountAmount();
-        
+
         return [
             'asin' => $this->getAsin(),
             'title' => $this->getTitle(),
@@ -758,6 +786,9 @@ class ProductItem
             'dimensions' => $this->getDimensions(),
             'weight' => $this->getWeight(),
             'classifications' => $this->getClassifications(),
+            'content_rating' => $this->getContentRating(),
+            'is_adult' => $this->isAdultProduct(),
+            'external_ids' => $this->getExternalIds(),
             // New deal-related fields
             'has_active_deal' => $this->hasActiveDeal(),
             'deal_info' => $this->getDealInfo(),
